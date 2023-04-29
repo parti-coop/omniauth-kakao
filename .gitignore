@@ -1,1 +1,4 @@
 *.gem
+tags
+.byebug_history
+.tool-versions

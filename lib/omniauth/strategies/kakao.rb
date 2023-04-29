@@ -8,9 +8,10 @@ module OmniAuth
       option :name, 'kakao'
 
       option :client_options, {
-        :site => 'https://kauth.kakao.com',
-        :authorize_path => '/oauth/authorize',
-        :token_url => '/oauth/token',
+        site: 'https://kauth.kakao.com',
+        authorize_path: '/oauth/authorize',
+        token_url: '/oauth/token',
+        auth_scheme: :request_body
       }
 
       uid { raw_info['id'].to_s }
@@ -18,12 +19,13 @@ module OmniAuth
       info do
         {
           'name' => raw_properties['nickname'],
-          'image' => raw_properties['thumbnail_image'],
-        }
+          'profile_image' => raw_properties['profile_image'],
+          'thumbnail_image' => raw_properties['thumbnail_image']
+        }.merge(kakao_account)
       end
 
       extra do
-        {'properties' => raw_properties}
+        { 'properties' => raw_properties }
       end
 
       def initialize(app, *args, &block)
@@ -33,23 +35,35 @@ module OmniAuth
 
       def callback_phase
         previous_callback_path = options.delete(:callback_path)
-        @env["PATH_INFO"] = "/auth/kakao/callback"
+        @env["PATH_INFO"] = callback_path
         options[:callback_path] = previous_callback_path
         super
       end
 
-      def mock_call!(*)
-        options.delete(:callback_path)
-        super
+      # callback_uri와 관련해서 redirect_uri_mismatch 문제가 나오던것을 path match를 통해서 해결합니다.
+      # 해당 문제는 https://devtalk.kakao.com/t/rest-api-omniauth/19207 에서 나오는 문제를 해결합니다.
+      # NOTE If we're using code from the signed request then FB sets the redirect_uri to '' during the authorize phase and it must match during the access_token phase:
+      # https://github.com/facebook/facebook-php-sdk/blob/master/src/base_facebook.php#L477
+      def callback_url
+        if @authorization_code_from_signed_request_in_cookie
+          ''
+        else
+          # callback url ignorance issue from https://github.com/intridea/omniauth-oauth2/commit/85fdbe117c2a4400d001a6368cc359d88f40abc7
+          options[:callback_url] || (full_host + script_name + callback_path)
+        end
       end
 
     private
       def raw_info
-        @raw_info ||= access_token.get('https://kapi.kakao.com/v1/user/me', {}).parsed || {}
+        @raw_info ||= access_token.get('https://kapi.kakao.com/v2/user/me', {}).parsed || {}
       end
 
       def raw_properties
         @raw_properties ||= raw_info['properties']
+      end
+
+      def kakao_account
+        @kakao_account ||= (raw_info['kakao_account']&.except('profile') || {})
       end
     end
   end
